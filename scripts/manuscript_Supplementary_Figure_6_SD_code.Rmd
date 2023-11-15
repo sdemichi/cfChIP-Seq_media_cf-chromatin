@@ -1,0 +1,351 @@
+---
+title: "Supplementary Figure 6"
+authors: "Steven D. De Michino, Sasha Main, and Lucas Penny"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Simulating cell-free chromatin using preclinical models for cancer-specific biomarker discovery
+
+### Supplementary Figure 6. cfChIP-Seq from SU-DHL-6 conditioned media cf-chromatin reflects distinct chromatin states.
+
+```{r, setup, echo = TRUE, eval = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(ssh)
+library(tidyverse)
+library(scales)
+library(gt)
+library(readxl)
+library(RColorBrewer)
+library(GenomicRanges)
+library(ChIPpeakAnno)
+library(UpSetR)
+library(biomaRt)
+library(MetBrewer)
+library(cowplot)
+library(chipenrich)
+library(reshape2)
+library(ggnewscale)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(EnsDb.Hsapiens.v86)
+library(Repitools)
+library(dendextend)
+library(bedtoolsr)
+library(ChIPseeker)
+
+```
+
+## Supplementary Figure 6A
+
+A) Preliminary validation of antibody specificity using recombinant histones (Active Motif) on a western blot. Antibodies against the desired target modifications (H3K4me3 and H3K27me3, respectively) were tested against recombinant H3K4me1, H3K4me2, H3K4me3, and H3K27me3, demonstrating antibody specificity. Additional data for the specificity of the H3K27me3 antibody (Cell Signaling) is described elsewhere108.
+
+No code was used to generate this figure.
+
+## Supplementary Figure 6B
+
+B) Pearson correlation across the coverage profiles from Figure 3B. Correlations were summarised over 1000 bp bins, genome wide. 
+
+```{bash, Supp_Figure_6B_genome-wide_Pearson_correlation_of_SU-DHL-6_media_cf-chromatin_H3K4me3_profiles, echo = TRUE, eval = FALSE}
+
+# General workflow: bigWig files -> Step 1: deepTools multiBigwigSummary -> Step 2: deepTools plotCorrelation
+
+#!/bin/bash
+
+# Edit these paths to match your directory structure
+bwDirs="/path/to/your/bw/files/*.bw" # make sure to include H3K4me3 cfChIP samples (30/300ng input, biological reps)
+outDir="/path/to/your/output/directory"
+referenceBlacklist="/path/to/your/reference/hg38-blacklist.v2.bed.gz"
+
+# import module
+module load deeptools/3.2.1
+
+# Step 1: deepTools multiBigwigSummary was used to generate the numpy array, which was the source data of the visualization in Supplementary Figure 6B.
+multiBigwigSummary bins -b ${bwDirs}/{all_files,comma_separated,no_spaces} \ 
+-bl ${referenceBlacklist} \ 
+--binSize 1000 \ 
+-p max \ 
+-o ${outDir}/output.npz \ 
+--outRawCounts ${outDir}/raw_counts.tab
+
+# Step 2: deepTools plotCorrelation was used to generate the correlation matrix.
+plotCorrelation -in ${outDir}/output.npz \ 
+-c pearson \ 
+--skipZeros \ 
+--removeOutliers \ 
+-p heatmap \ 
+--outFileCorMatrix ${outDir}/correlations.tab \ 
+--colorMap RdYlBu \ 
+--plotNumbers \ 
+-o ${outDir}/SupplementaryFigure6B.png
+
+```
+
+## Supplementary Figure 6C
+
+C) Using ChIPEnrich, pathway analysis using peaks from SU-DHL-6 media profiles was performed and compared to ENCODE H3K4me3 profiles from various cell types (similar to Figure 3F). Each square in the heatmap represents a comparison between SU-DHL-6 media H3K4me3 and H3K4me3 from another cell line. Pearson correlation R values between odds ratios for particular pathway terms, for the different gene sets (including KEGG, Panther, Biocarta, and PFAM), are shown. Multiple gene sets were used to demonstrate correlations independent of the gene set.
+
+```{r, Supp_Figure_6C_heatmap_of_Pearson_R_values_for_H3K4me3_convergence_over_pathways_ENCODE_profiles_and_media_cf-chromatin, echo = TRUE, eval = FALSE}
+
+# Step 1: ChIPEnrich data preprocessing (ONLY RUN ONCE)
+
+# Use ENCODE profiles and SU-DHL-6 media profile from Figure 4E.
+# Make a list of the ENCODE H3K4me3 BED files within the working directory (including media cf-chromatin)
+# SUDHL6_H3K4me3_300ng_Rep1_subsampled_p1e-6.narrowPeak was used for this analysis
+setwd("path/to/ENCODE_bed_files_and_SUDHL6_media_profile")
+
+# Make a list of the ENCODE H3K4me3 BED files within the working directory (including media cf-chromatin)
+encode_bed_files <- list.files(path = ".", pattern = ".bed|narrowPeak")
+
+# Loop over each of the items in the list, to modify BED files for ChIPEnrich processing (as errors occur, otherwise)
+for (x in encode_bed_files) {
+  temp <- read.delim(x, header = FALSE, sep = "\t", stringsAsFactors = FALSE) # Save temporary data frame pertaining to the character in the list.
+  temp[,7:8] <- lapply(temp[,7:8], as.integer) # Convert decimal to integer values.
+  temp <- temp[temp$V7 <= temp$V8,] # Remove rows where value in column 7 is higher than 8 (which was only a few)
+  temp[,9] <- ifelse(temp$V9 > 255, 255, temp$V9) # RBG values should not be higher than 255, reduce all values over 255, to 255. Error in original BED.
+  write.table(temp, # Write output of temp to a new file in the same working directory.
+              file = paste("update_", x, sep = ""), # Paste new character at the beginning of the file name pertaining to x, from the list.
+              sep = "\t", 
+              row.names = FALSE, 
+              col.names = FALSE, 
+              quote = FALSE)
+  rm(temp)
+}
+
+
+# Step 2: run ChIPEnrich on processed BED files (ONLY RUN ONCE)
+
+# List updated ENCODE BED files
+setwd("~/Library/CloudStorage/OneDrive-UniversityofToronto/1 MBP/1 Bratman Lab/1 Experiments/11 Sequencing/ENCODE_profiles/BED/k4me3/chipenrich_all_encode/updated_bed_files")
+update_encode_bed_files <- list.files(path = ".", pattern = "update") # Make a list of the modified BED files.
+
+# Use ChIPEnrich to identify active pathways represented by K4me3 at promoters of genes involved in the pathways
+supported_genesets() # Check to see list of available gene sets
+for (i in update_encode_bed_files) {
+  chipenrich(i,
+             out_name = paste("path", i, sep = ""),
+             out_path = "~/OneDrive - University of Toronto/1 MBP/1 Bratman Lab/1 Experiments/11 Sequencing/ENCODE_profiles/BED/k4me3/chipenrich_all_encode/chipenrich_output_pfam",
+             genome = "hg38",
+             genesets = c("pfam"), # Select the gene set of interest
+             locusdef = "nearest_tss",
+             method = "chipenrich",
+             qc_plots = TRUE)
+}
+
+
+# Step 3: Analysis of ChIPEnrich output
+# Start from here if ChIPEnrich data is generated from above code. If files aren't prepared, run above code in this chunk.
+
+# Function to process ChIPEnrich output data, and perform regressions
+chipenrich_output_processing <- function() {
+
+  results_files <- list.files(path = ".", pattern = "results.tab") # Compile results files from ChIPEnrich
+
+# Create a data frame of all odds ratios for the results in the above list, and rename column name to ENCODE file accession in the character string
+list_of_odds_ratios <- list()
+for (i in results_files) {
+  temp <- read.delim(i, header = TRUE, sep = "\t") # Read in file
+  temp <- data.frame(c(temp$Odds.Ratio), c(temp$Description)) # Extract columns with odds ratio and pathway descriptions
+  temp <- setNames(temp, c(paste(substr(i, 12, 22), "_Odds.Ratio", sep = ""), "Description")) # Rename odds ratios columns by their respective frame name
+  temp <- temp[order(temp$Description),] # Order rows by description, in alphabetical order (so that all rows should be matching in the list)
+  list_of_odds_ratios[[i]] <- temp # Compile output into a list
+}
+
+# Bind odds ratios from each list into a single data frame
+k4me3_odds_ratios <- do.call(cbind, list_of_odds_ratios)
+k4me3_odds_ratios <- k4me3_odds_ratios[, -grep("Description", colnames(k4me3_odds_ratios))] # Remove columns with descriptions
+
+# Extract cell line names from column headers
+names <- list(paste(substr(colnames(k4me3_odds_ratios),12,22)))
+names <- data.frame(names)
+
+# Compute Pearson R for correlations between SU-DHL-6media cf-chromatin profile and each ENCODE nuclear chromatin profile
+list_of_R_values <- data.frame()
+for (i in k4me3_odds_ratios) {
+  temp <- cor(k4me3_odds_ratios$insert_SUDHL6_media_k4me3_profile, # Insert column header from media profile
+              i, 
+              method = "pearson") # Perform Pearson correlation
+  list_of_R_values <- rbind(list_of_R_values, temp)
+}
+
+# Bind Pearson R values to their respective file names extracted in previous step
+R_final <- cbind(list_of_R_values, names)
+R_final <- R_final[1:68,] # Remove the self correlation with SU-DHL-6 media
+R_final <- setNames(R_final, c("Pearson R", "Cell Line")) # Rename columns
+
+# Encode_metadata processing, and matching to cell line info
+setwd("path/to/ENCODE_cell_line_metadata")
+encode_metadata <- read_xlsx("figure4E_supplementary_figure6C_encode_metadata_final.xlsx") # Import metadata, including cell line annotations (which were manually annotated from ENCODE/Cellosaurus)
+encode_metadata <- encode_metadata[order(encode_metadata$`File accession`),] # Sort ENCODE metadata by ascending file accession, as in R_final
+encode_metadata <- encode_metadata[1:68,]
+
+R_plus_metadata <- cbind(R_final,
+                         encode_metadata$`File accession`,
+                         encode_metadata$`Biosample term name`,
+                         encode_metadata$Pathology,
+                         encode_metadata$`Biosample Tissue`,
+                         encode_metadata$`Biosample Tissue Summary`,
+                         encode_metadata$`Cancer?`) # Check to see that accessions are sorted properly. If so, plot the cell line name vs Pearson R.
+
+R_plus_metadata <- setNames(R_plus_metadata, c("pearson_R",
+                                               "B",
+                                               "C",
+                                               "cell_line",
+                                               "pathology",
+                                               "tissue",
+                                               "tissue_summary",
+                                               "cancer_status")) # rename columns, B and C refer to accessions
+R_plus_metadata <- R_plus_metadata[,c("pearson_R",
+                                      "cell_line",
+                                      "pathology",
+                                      "tissue",
+                                      "tissue_summary",
+                                      "cancer_status")] # remove the ENCODE file names
+} # End function
+
+# Apply the function (chipenrich_output_processing) over the directories of ChIPEnrich results, and compile the output into a single data frame
+parent.directory <- "path/to/parent/directory/"
+sub.directory <- list.dirs(parent.directory, recursive = TRUE)[-1] # List directories within the parent directory, excluding the parent directory.
+
+rm(all_pathways_R)
+all_pathways_R <- data.frame() # Make a data frame to compile each of the iterations of the output over each directory.
+for (i in sub.directory) {
+  setwd(i)
+  temp <- chipenrich_output_processing()
+  temp <- cbind(temp, basename(i))
+  all_pathways_R <- rbind(all_pathways_R, temp)
+} # Write the output of the function over each sub-directory to a list.
+
+# Prepare data for clustering
+all_pathways_R_clustering <- pivot_wider(all_pathways_R, names_from = 'basename(i)', values_from = pearson_R) # Long to wide
+all_pathways_R_clustering_sub <- all_pathways_R_clustering[,6:9]
+all_pathways_R_clustering_sub <- as.matrix(all_pathways_R_clustering_sub) # Generate numeric data matrix from the subset data
+
+# Perform unsupervised clustering (hierarchical) on the unsorted, unlabeled data as output from each of the databases
+all_pathways_R_clustering_sub <- scale(all_pathways_R_clustering_sub) # Scale numeric matrix
+hierarchical <- dist(all_pathways_R_clustering_sub, method = "euclidean") # Calculate euclidean distances
+clusters <- hclust(hierarchical, method = "ward.D2") # Create hclust object from euclidean distance matrix
+cell_line_order <- all_pathways_R_clustering[clusters$order,] # Reorder original data frame by dendrogram order before labeling nodes
+
+clusters <- as.dendrogram(clusters) # Convert the dendrogram to a format compatible with dendextend, for modifications to labels
+dendextend::labels(clusters) <- cell_line_order$cell_line # Relabel indices as data labels (after hierarchical clustering)
+dend_color <- c(GCB_DLBCL = "green", ABC_DLBCL = "red", Blood = "blue", Other = "black") # Set data label colours for dendrogram
+dendextend::labels_colors(clusters) <- dend_color[cell_line_order$tissue_summary] # Apply new colours
+par(mar=c(8, 4.1, 4.1, 2.1)) # Increase bottom marain before plotting dendrogram
+
+# Plot dendrogram
+plot(clusters) 
+
+# Sort base data frame by order of dendrogram
+all_pathways_R_sorted <- all_pathways_R %>%
+  mutate(cell_line = factor(cell_line, levels = cell_line_order$cell_line)) %>% # Set factor level by cell_line.
+  arrange(all_pathways_R$`basename(i)`, cell_line) # First arrange by database, then within each database by cell line, according to dendrogram.
+
+# Plot R values as a discrete heat map, where each row is a measured variable
+all_pathway_regression <- all_pathways_R_sorted %>%
+  ggplot(aes(x = cell_line, y = `basename(i)`, fill = pearson_R)) +
+  geom_tile(colour = "white") +
+  labs(x = "Cell Line", 
+       y = element_blank(),
+       fill = "R (Pearson)") +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        legend.position = "left") +
+  scale_fill_gradient(high = "#061e36", low = "#87cbff") +
+  coord_equal()
+
+print(all_pathway_regression)
+
+pathways_R <- all_pathways_R_sorted[all_pathways_R_sorted$`basename(i)`=="chipenrich_output_panther",] # Get sort order from one of the gene sets, for plotting metadata
+
+colour_k4me3_regression_metadata_tissue_summary <- c("#DF8B58", "#B1BB89", "#C46151", "#224B5E") # For cell type summary; colours from met.brewer (Hokusai1)
+colour_k4me3_regression_metadata_cancer_status <- c("#6D2F20", "#E4A45D") # For cancer status; colours from met.brewer
+
+# Plot tissue type
+cell_line_metadata_tissue <- pathways_R %>% 
+  ggplot(aes(x = cell_line, y = "Tissue", fill = tissue_summary)) +
+  geom_tile(colour = "white") +
+  labs(x = element_blank(), 
+       y = element_blank(),
+       fill = "Tissue Type") +
+  theme_cowplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "left") +
+  scale_fill_manual(values = colour_k4me3_regression_metadata_tissue_summary) +
+  coord_equal()
+
+print(cell_line_metadata_tissue)
+
+# Plot cancer status
+cell_line_metadata_cancer_status <- pathways_R %>% 
+  ggplot(aes(x = cell_line, y = "Cancer Status", fill = cancer_status)) +
+  geom_tile(colour = "white") +
+  labs(x = element_blank(), 
+       y = element_blank(),
+       fill = "Cancer Status") +
+  theme_cowplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "left") +
+  scale_fill_manual(values = colour_k4me3_regression_metadata_cancer_status) +
+  coord_equal()
+
+print(cell_line_metadata_cancer_status)
+
+# Assemble dendrogram, heatmap (Pearson R), and metadata manually into final figure
+
+```
+
+## Supplementary Figure 6D
+
+D) Low and high input cfChIP-Seq for H3K27me3 from SU-DHL-6 media cf-chromatin shown, alongside replicates of SU-DHL-6 H3K27me3 ChIP-Seq from ENCODE69 and SU-DHL-6 RNA-Seq44. BigWig files were RPKM normalized before visualization with the UCSC genome browser48,109. Tracks were visualized over a large genomic window on chromosome 5. 
+
+Data was visualized using the bigWig files and UCSC genome browser. Data was deposited in the Cyverse Discovery Environment for viewing. A tutorial of how to do this can be found here: https://www.youtube.com/watch?v=UvHihNbyCh8. The lines below were used.
+
+## Supplementary Figure 6E
+
+E) Overlap of H3K4me3 and H3K27me3 MACS2 peaks from SU-DHL-6 media cf-chromatin (both generated with 300 ng cf-chromatin as input). Overlapping peaks represent bivalent domains.
+
+```{r Supp_Figure_6C6E - SU-DHL-6 RNA expression at bivalent chromatin domains vs H3K4me3 and H3K27me3 independently, echo = TRUE, eval = FALSE}
+
+# Import media cf-chromatin peak files for H3K4me3 and H3K27me3 (SU-DHL-6)
+# H3K27me3
+sudhl6_k27me3 <- read.delim("path/to/bed/files/SUDHL6_H3K27me3_300ng_Rep1_unsampled_p1e-5.narrowPeak", header = FALSE, sep = "\t") # more stringent peaks
+sudhl6_k27me3 <- setNames(sudhl6_k27me3, c("seqnames", "start", "end", "name", "score")) # rename first five columns
+gr_sudhl6_k27me3 <- GRanges(sudhl6_k27me3[,1:3]) # convert to GRanges object
+
+# H3K4me3
+sudhl6_k4me3 <- read.delim("path/to/bed/files/SUDHL6_H3K4me3_300ng_Rep1_subsampled_p1e-6.narrowPeak", header = FALSE, sep = "\t")
+sudhl6_k4me3 <- setNames(sudhl6_k4me3, c("seqnames", "start", "end", "name", "score"))
+gr_sudhl6_k4me3 <- GRanges(sudhl6_k4me3[,1:3])
+
+# Colour palatte for venn diagram
+bivalent_venn_colour <- brewer.pal(n = 3, "Oranges")
+
+# Find overlap in peaks (ChIPPeakAnno)
+overlap_sudhl6_media_K4me3_K27me3 <- findOverlapsOfPeaks(gr_sudhl6_k4me3, gr_sudhl6_k27me3)
+plot_overlap <- makeVennDiagram(overlap_sudhl6_media_K4me3_K27me3, 
+                category.names = c("K4", "K27"),
+                cex = 2.5, 
+                fontface = "bold", 
+                fontfamily = "sans", 
+                cat.fontfamily = "sans", 
+                cat.pos = c(-150, 140), 
+                cat.dist = c(0.06, 0.04), 
+                cat.cex = 2,
+                col = "grey",
+                par(mar = c(9,9,9,9)),
+                fill = c("#FEE6CE", "#E6550D"))
+
+```
+
+## Supplementary Figure 6F
+
+F) Visualization of an example bivalent promoter (TP53INP1) using the UCSC genome browser. Tracks represent RNA-Seq from SU-DHL-6, media H3K4me3 (300 ng input), and media H3K27me3 (300 ng input), respectively. All profiles were RPKM normalized before visualization.
+
+Data was visualized using the bigWig files and UCSC genome browser. Data was deposited in the Cyverse Discovery Environment for viewing. A tutorial of how to do this can be found here: https://www.youtube.com/watch?v=UvHihNbyCh8. The lines below were used.
+

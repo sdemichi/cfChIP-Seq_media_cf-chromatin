@@ -1,0 +1,148 @@
+---
+title: "Figure 6"
+authors: "Steven D. De Michino"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Simulating cell-free chromatin using preclinical models for cancer-specific biomarker discovery
+
+# Main Figure 6: Active and repressive histone modifications within cf-chromatin predict nuclear chromatin states.
+
+```{r, setup, echo = TRUE, eval = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(bedtoolsr)
+library(BiocParallel) 
+library(biomaRt)
+library(chipenrich)
+library(ChIPpeakAnno)
+library(ChIPseeker)
+library(ChIPQC)
+library(cowplot)
+library(csaw)
+library(d3heatmap)
+library(data.table)
+library(dendextend)
+library(DESeq2)
+library(DiffBind)
+library(dplyr)
+library(EnsDb.Hsapiens.v86)
+library(forcats)
+library(GenomicRanges)
+library(ggnewscale)
+library(ggplotify)
+library(ggplot2)
+library(ggpubr)
+library(ggthemes)
+library(gt)
+library(heatmaply)
+library(hrbrthemes)
+library(MetBrewer)
+library(plotly)
+library(profileplyr)
+library(RColorBrewer)
+library(readxl)
+library(Repitools)
+library(reshape2)
+library(tidyverse)
+library(TxDb.Hsapiens.UCSC.hg38.knownGene)
+library(viridis)
+library(scales)
+
+```
+
+## Figure 6A
+
+A)  Violin plots depicting SU-DHL-6 RNA-Seq expression at genes marked with either promoter H3K27me3 only, H3K4me3 only, or both modifications (i.e., bivalent promoters). Peak groups were identified by quantifying the proportion of overlapping peaks from SU-DHL-6 media H3K4me3 and H3K27me3 profiles (Supplementary Fig. S4B). Only peaks within 3 kb of the TSS of the nearest gene were used in the analysis. Median RNA expression for each group is represented by a solid line, with the interquartile ranges marked by dotted lines. Welch's t-test: H3K4me3 vs. H3K27me3, p=1.87e-7; H3K4me3 vs. bivalent, p=1.19e-11; H3K27me3 vs. bivalent, p=0.915.
+
+```{r, Figure_6A_SU-DHL-6_RNA_expression_at_bivalent_chromatin_domains_vs_H3K4me3_and_H3K27me3_independently, echo = TRUE, eval = FALSE}
+
+# This code is derived from the Supplementary Figure 6E
+
+# Import media cf-chromatin peak files for H3K4me3 and H3K27me3 (SU-DHL-6)
+
+# H3K27me3
+sudhl6_k27me3 <- read.delim("path/to/bed/files/SUDHL6_H3K27me3_300ng_Rep1_unsampled_p1e-5.narrowPeak", header = FALSE, sep = "\t") # more stringent peaks
+sudhl6_k27me3 <- setNames(sudhl6_k27me3, c("seqnames", "start", "end", "name", "score")) # rename first five columns
+gr_sudhl6_k27me3 <- GRanges(sudhl6_k27me3[,1:3]) # convert to GRanges object
+
+# H3K4me3
+sudhl6_k4me3 <- read.delim("path/to/bed/files/SUDHL6_H3K4me3_300ng_Rep1_subsampled_p1e-6.narrowPeak", header = FALSE, sep = "\t")
+sudhl6_k4me3 <- setNames(sudhl6_k4me3, c("seqnames", "start", "end", "name", "score"))
+gr_sudhl6_k4me3 <- GRanges(sudhl6_k4me3[,1:3])
+
+# Colour palatte for venn diagram
+bivalent_venn_colour <- brewer.pal(n = 3, "Oranges")
+
+# Find overlap in peaks (ChIPPeakAnno)
+overlap_sudhl6_media_K4me3_K27me3 <- findOverlapsOfPeaks(gr_sudhl6_k4me3, gr_sudhl6_k27me3)
+
+bivalent_peaks <- overlap_sudhl6_media_K4me3_K27me3[["overlappingPeaks"]][["gr_sudhl6_k4me3///gr_sudhl6_k27me3"]] # extract overlapping ranges
+bivalent_peaks <- bivalent_peaks[,2:4] # subset to chr, start, end
+bivalent_peaks <- bivalent_peaks %>% 
+  mutate(group = c("bivalent")) # add fourth column with "bivalent" feature label
+
+# Process unique peak data
+k4_k27_unique_peaks <- as.data.frame(overlap_sudhl6_media_K4me3_K27me3[["uniquePeaks"]]) # extract unique peaks from overlap analysis
+k4_k27_unique_peaks <- k4_k27_unique_peaks[,1:3]
+k4_k27_unique_peaks <- k4_k27_unique_peaks %>% 
+  mutate(group = rownames(k4_k27_unique_peaks)) # Make rowname a column, for H3K4me3 and H3K27me3 labels
+k4_k27_unique_peaks$group <- gsub("gr_sudhl6_","",k4_k27_unique_peaks$group) # For labels, remove all characters before K4me3 or K27me3
+k4_k27_unique_peaks$group <- substr(k4_k27_unique_peaks$group,1,nchar(k4_k27_unique_peaks$group)-7) # Remove last seven characters of each string in the column, so that only k4me3 or k27me3 remains.
+
+# Merge all peaks (annotated as k4me3, k27me3, or bivalent)
+merged_peaks <- rbind(k4_k27_unique_peaks,bivalent_peaks) 
+
+# Change all k4me3/k27me3 labels to formal H3K4me3/H3K27me3
+merged_peaks$group <- gsub("k", "H3K", merged_peaks$group)
+
+# Convert to GRanges object and remove duplicate ranges
+gr_merged_peaks <- unique(GRanges(merged_peaks))
+
+# Use ChIPSeeker to annotate peaks in merged dataset; assign single Ensembl gene ID to each peak
+anno_gr_merged_peaks <- annotatePeak(gr_merged_peaks, tssRegion = c(-3000, 3000), 
+                                     TxDb = TxDb.Hsapiens.UCSC.hg38.knownGene, level = "gene", annoDb = "org.Hs.eg.db")
+df_anno_gr_merged_peaks <- as.data.frame(anno_gr_merged_peaks)
+
+# Take only rows where the distance to the TSS = 0; to remove ranges not assigned to TSS. Stringent cutoff.
+df_anno_gr_merged_peaks <- unique(df_anno_gr_merged_peaks[df_anno_gr_merged_peaks$distanceToTSS == 0,])
+
+# Import SU-DHL-6 counts with gene annotations. RNA-Seq was from the LL100 (Quentmeier, H. et al. The LL-100 panel: 100 cell lines for blood cancer studies. Sci. Rep. (2019) doi:10.1038/s41598-019-44491-x)
+setwd("path/to/SUDHL6_RNA_counts")
+sudhl6_rna_counts_geneannotated <- read.delim("figure6A_LL100_SUDHL6_RNA_counts.txt", header = TRUE, sep = "\t")
+
+# Match the RNA expression data frame to the newly annotated peak data frame
+colnames(sudhl6_rna_counts_geneannotated)[1] <- "ENSEMBL" # change column name of ENSEMBL gene IDs so they match across data frames
+merged_peaks_rna_sudhl6 <- merge(df_anno_gr_merged_peaks, sudhl6_rna_counts_geneannotated, by = "ENSEMBL")
+
+# Set colour palette for violin plot, matching colour scheme from Figure 6D
+colour_violin <- c("#DC4141", "#6262BC", "#4AB1E8")
+
+# Visualize as violin plot
+merged_peaks_rna_sudhl6 %>%
+  mutate(group = fct_relevel(group, "H3K27me3", "bivalent", "H3K4me3")) %>% 
+  ggplot(aes(x = group, y = TPM, fill = group, colour = group)) +
+  geom_violin(draw_quantiles = c(0.25, 0.75), linetype = "dashed", alpha = 0.35) +
+  geom_violin(fill = "transparent", draw_quantiles = c(0.5)) +
+  geom_point(alpha = 0.2, position = position_jitterdodge(0.2), size = 2) +
+  theme_minimal(base_size = 20) + 
+  theme(legend.position = "none") +
+  labs(x = element_blank(),
+       y = "SU-DHL-6 RNA Expression (TPM)") +
+  scale_y_continuous(trans = 'log10') +
+  scale_colour_manual(values = colour_violin) +
+  scale_fill_manual(values = colour_violin)
+
+# Prepare data frames for comparing stats across groups
+rna_expression_k4me3 <- merged_peaks_rna_sudhl6[merged_peaks_rna_sudhl6$group == "H3K4me3",]
+rna_expression_k27me3 <- merged_peaks_rna_sudhl6[merged_peaks_rna_sudhl6$group == "H3K27me3",]
+rna_expression_bivalent <- merged_peaks_rna_sudhl6[merged_peaks_rna_sudhl6$group == "bivalent",]
+
+# Perform Welch's t-test across groups
+t_k27_bivalent <- t.test(rna_expression_k27me3$TPM, rna_expression_bivalent$TPM, paired = FALSE, var.equal = FALSE)$p.value
+t_k27_k4 <- t.test(rna_expression_k27me3$TPM, rna_expression_k4me3$TPM, paired = FALSE, var.equal = FALSE)$p.value
+t_bivalent_k4 <- t.test(rna_expression_bivalent$TPM, rna_expression_k4me3$TPM, paired = FALSE, var.equal = FALSE)$p.value
+
+```

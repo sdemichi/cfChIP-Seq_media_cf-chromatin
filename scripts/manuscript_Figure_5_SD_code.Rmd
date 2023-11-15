@@ -1,0 +1,59 @@
+---
+title: "Figure 5"
+authors: "Steven D. De Michino, Sasha Main, and Lucas Penny"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Simulating cell-free chromatin using preclinical models for cancer-specific biomarker discovery
+
+# Main Figure 5: H3K27me3 from media cf-chromatin reflects repressive chromatin states within SU-DHL-6 cells.
+
+```{r, setup, echo = TRUE, eval = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load R libraries
+library(data.table)
+library(ggplot2)
+
+```
+
+## Figure 5A
+
+A)  Spearman correlation between SU-DHL-6 media cf-H3K27me3 profiles (10, 30, and 300 ng cfDNA input and technical replicates), ENCODE SU-DHL-6 chromatin profiles (biological replicates), SU-DHL-6 RNA-Seq (LL100), and IgG control (ENCODE).
+
+```{bash, Figure_5A_correlation_matrix_SU-DHL-6_media_cf-chromatin_H3K27me3, echo = TRUE, eval = FALSE}
+
+# General workflow: bigWig files -> Step 1: deepTools multiBigwigSummary -> Step 2: deepTools plotCorrelation
+
+#!/bin/bash
+
+# Edit these paths to match your directory structure
+bwDirs="/path/to/your/bw/files/*.bw" # make sure to include H3K27me3 cfChIP samples (10/30/300ng input, biological reps), 
+                                     # and ENCODE profiles (SU-DHL-6 H3K27me3, RNA-Seq, and IgG).
+outDir="/path/to/your/output/directory"
+referenceBlacklist="/path/to/your/reference/hg38-blacklist.v2.bed.gz"
+
+# Import module
+module load deeptools/3.2.1
+
+# Step 1: deepTools multiBigwigSummary was used to generate the numpy array, which was the source data of the visualization in Figure 5A.
+multiBigwigSummary bins -b ${bwDirs}/{all_files,comma_separated,no_spaces} \ 
+-bl ${referenceBlacklist} \ 
+--binSize 10000 \ 
+-p max \ 
+-o ${outDir}/output.npz \ 
+--outRawCounts ${outDir}/raw_counts.tab
+
+# Step 2: deepTools plotCorrelation was used to generate the correlation matrix.
+plotCorrelation -in ${outDir}/output.npz \ 
+-c spearman \ 
+--skipZeros \ 
+--removeOutliers \ 
+-p heatmap \ 
+--outFileCorMatrix ${outDir}/correlations.tab \ 
+--colorMap RdYlBu \ 
+--plotNumbers \ 
+-o ${outDir}/Figure5A.png
+
+```

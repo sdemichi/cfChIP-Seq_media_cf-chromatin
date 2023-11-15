@@ -1,0 +1,342 @@
+---
+title: "Figure 4"
+authors: "Steven D. De Michino"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Simulating cell-free chromatin using preclinical models for cancer-specific biomarker discovery
+
+# Main Figure 4: H3K4me3 profiling from media cf-chromatin reflects cell line profiles and biology
+
+```{r, setup, echo = TRUE, eval = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(ssh)
+library(tidyverse)
+library(scales)
+library(gt)
+library(readxl)
+library(RColorBrewer)
+library(GenomicRanges)
+library(ChIPpeakAnno)
+library(UpSetR)
+library(biomaRt)
+library(MetBrewer)
+library(cowplot)
+library(reshape2)
+library(ggnewscale)
+library(Repitools)
+library(dendextend)
+library(bedtoolsr)
+
+```
+
+## Figure 4A
+
+A) Schematic summarizing methods for MNase treatment of cf-chromatin and cfChIP-Seq for H3K4me3 and H3K27me3 from SU-DHL-6 conditioned media. 
+
+This figure was made in BioRender.
+
+## Figure 4B
+
+B) H3K4me3 cfChIP-Seq coverage 3 kB around global TSSs, across biological replicates of 30ng (low) and 300ng (high) ChIP input concentrations. Profiles were subsampled down to the same read depth before analysis. 
+
+```{bash, Figure_4B_heatmap_of_H3K4me3_expression_at_TSSs_across_replicates_at_30ng_and_300ng_input_concentrations, echo = TRUE, eval = FALSE}
+
+# General workflow: bigWig files -> step 1: deepTools computeMatrix -> step 2: deepTools plotHeatmap
+
+#!/bin/bash
+
+# Edit these paths to match your directory structure
+bwDirs="/path/to/your/bw/files/*.bw" # make sure to include H3K4me3 cfChIP samples (30/300ng input, both biological replicates)
+outDir="/path/to/your/output/directory"
+
+# Import module
+module load deeptools/3.2.1
+
+# Step 1: deepTools computeMatrix, to generate the heatmap data
+# Sufficient memory required
+computeMatrix reference-point \ 
+--referencePoint TSS \ 
+-S ${bwDirs}/{bw_files,comma_separated,no_spaces} \ 
+-a 3000 \ 
+-b 3000 \ 
+-p max \ 
+--skipZeros \ 
+--missingDataAsZero \ 
+-o ${outDir}/output.gz
+
+# Step 2: deepTools plotHeatmap was used for heatmap visualization
+module load deeptools/3.2.1
+
+plotHeatmap -m ${outDir}/output.gz \ 
+-o ${outDir}/Figure4B.png \ 
+--colorMap Blues \ 
+--legendLocation none
+
+``` 
+
+## Figure 4C
+
+C) UpSet plot of the overlap in H3K4me3 cfChIP-Seq MACS2-called peaks across replicate sets. Peak number for 30ng, Rep2 was low due to low coverage.
+
+The code from this plot was modified from github (https://github.com/stevekm/Bioinformatics/tree/776c420efac851c6780ce573939fb6610a3b9ae8/HOMER_mergePeaks_pipeline/HOMER_mergePeaks_venn_UpSetR).
+
+```{r, Figure_4C_UpSet_plot_of_overlapping_peaks_across_replicates, echo = TRUE, eval = FALSE}
+
+# Set working directory
+setwd("/path/to/dir") # Edit this path to match the location of your file (below)
+
+# Read in the venn text, output from HOMER mergePeaks
+venn_table_df <- read.table("figure4C_H3K4me3_media_peak_overlap_venn.txt", header = TRUE, sep = "\t", stringsAsFactors = FALSE, check.names = FALSE)
+
+# Get the venn categories
+venn_categories <- colnames(venn_table_df)[!colnames(venn_table_df) %in% c("Total","Name")]
+
+# venn_categories
+num_categories <- length(venn_categories)
+
+# Make a summary table
+venn_summary<-venn_table_df[!colnames(venn_table_df) %in% venn_categories]
+
+# Convert the summary table to a numeric/int vector, with element names as the combination names
+# Swap the | character with &; for passing to UpSet fromExpression
+upset_expression <- setNames(venn_summary[['Total']], gsub("|","&",venn_summary[['Name']], fixed = TRUE))
+
+# Visualize UpSet
+upset(fromExpression(upset_expression),
+      nsets = num_categories, 
+      order.by = "freq", 
+      decreasing = T, 
+      mainbar.y.label = "Overlapping Peaks", 
+      sets.x.label = "Peaks per Category",
+      set_size.angles = 45,
+      text.scale = 3,
+      point.size = 5,
+      matrix.dot.alpha = 0.5)
+
+```
+
+## Figure 4D
+
+D) Venn diagram representing the overlap in peaks between a cf-H3K4me3 profile (300ng, Rep1) and ENCODE H3K4me3 nuclear chromatin profile from the ENCODE database.
+
+
+```{r, Figure_4D_Venn_Diagram_of_overlap_of_ENCODE_and_cf-chromatin_H3K4me3_peaks_SU-DHL-6, echo = TRUE, eval = FALSE}
+
+# Set working directory to directory with BED files
+setwd("path/to/bed/files")
+
+# Import peak data. ENCODE SU-DHL-6 H3K4me3 bam file downloaded from https://www.encodeproject.org/files/ENCFF800LQW/. File was subsampled to 16M reads for another analysis before peaks were called using MACS2.
+
+sudhl6_media_k4me3_R1_300ng <- read.table("SUDHL6_H3K4me3_300ng_Rep1_subsampled_p1e-6.narrowPeak", header = FALSE, fill = TRUE, sep = "\t")
+ENCODE_k4me3_sudhl6 <- read.table({ENCODE_bed_file}, header = FALSE, fill = TRUE, sep = "\t") # call ENCODE BED file here, see comment above.
+
+# Rename columns
+colnames(sudhl6_media_k4me3_R1_300ng) <- c("seqnames", "start", "end")
+colnames(ENCODE_k4me3_sudhl6) <- c("seqnames", "start", "end")
+
+# Create GRanges objects
+Gr_sudhl6_media_k4me3_R1_300ng <- GRanges(sudhl6_media_k4me3_R1_300ng[,1:3])
+Gr_ENCODE_k4me3_sudhl6 <- GRanges(ENCODE_k4me3_sudhl6[,1:3])
+
+# Find overlaps between the two profiles using ChIPPeakAnno
+Overlap_media_and_ENCODE_k4me3 <- findOverlapsOfPeaks(Gr_sudhl6_media_k4me3_R1_300ng, Gr_ENCODE_k4me3_sudhl6)
+
+# Make Venn Diagram
+makeVennDiagram(Overlap_media_and_ENCODE_k4me3, 
+                category.names = c("Media H3K4me3", "ENCODE H3K4me3"),
+                cex = 2.5, 
+                fontface = "bold", 
+                fontfamily = "sans", 
+                cat.fontfamily = "sans", 
+                cat.pos = c(-150, 140), 
+                cat.dist = c(0.06, 0.04), 
+                cat.cex = 2,
+                col = "grey",
+                par(mar = c(9,9,9,9)),
+                fill = c("#CBD5E8", "#FDCDAC"))
+```
+
+## Figure 4E
+
+E) Heatmap of H3K4me3 peak signal intensity (log(x+1) transformed) from SU-DHL-6 media cf-chromatin, SU-DHL-6 chromatin (ENCODE), and other lymphomas (GCB and ABC DLBCLs), other blood-derived or adjacent cell types, and other non-blood cell types (e.g., pancreatic and prostate cancer, and induced pluripotent stem cells). Each row represents the sum of peak intensities at a TSS (one TSS assigned per gene) and rows were sorted by SU-DHL-6 cf-H3K4me3 peak intensity. Unsupervised hierarchical clustering was used to sort the samples based on the rows.
+
+```{r, Figure_4E_heatmap_of_H3K4me3_peaks_across_cell_types_sorted_by_SU-DHL-6_media_cf-chromatin, echo = TRUE, eval = FALSE}
+
+# Manually specify path to bedtools. bedtools should be installed locally.
+options(bedtools.path = "local/path/to/bedtools") 
+
+# Read in TSS reference, subset to chr, start, end, and sort features by chromosome number and chromosomal ranges
+# TSS reference was created using biomaRt (v2.50.0).
+setwd("path/to/TSS_Reference/") # Edit this to you TSS reference location
+my_features <- read.delim("figure4E_hg38_protein_coding_gene_TSS_reference.bed", header = FALSE, sep = "\t")
+my_features <- my_features[,1:3]
+my_features <- bedtoolsr::bt.sort(i = my_features)
+
+# Make a list of the ENCODE H3K4me3 BED files within the working directory (including media cf-chromatin)
+# Download ENCODE profiles before starting. See figure4E_supplementary_figure6C_encode_metadata_final.xlsx for ENCODE files to be downloaded.
+# SUDHL6_H3K4me3_300ng_Rep1_subsampled_p1e-6.narrowPeak was used for this analysis
+setwd("path/to/ENCODE_bed_files_and_SUDHL6_media_profile") # Edit this to your path
+encode_bed_files <- list.files(path = ".", pattern = ".bed|narrowPeak")
+gc()
+
+# Read in BED files, and match peaks from all profiles to nearest TSS in reference
+my_data <- list()
+filename <- c()
+for (i in encode_bed_files) {
+  filename <- i
+  temp <- data.table::fread(file = i)
+  temp <- bedtoolsr::bt.sort(i = temp)
+  b <- my_features
+  c <- bedtoolsr::bt.closest(b, temp, d = TRUE, t = "first")
+  c <- c %>% 
+    mutate(V8 = ifelse(V14 >= 5000, 0, V8)) # For values of V14 (distance to TSS) >=5000, replace V8 (H3K4me3 peak intensity) with 0; otherwise, leave the same. This way, TSSs further than 5000 bp from a peak aren't "matched" to that peak.
+  annotated.file <- c[c(1:3,8,14)] # Subset to important features.
+  annotated.file <- cbind(annotated.file, filename)
+  annotated.file$row_num <- seq.int(nrow(annotated.file))
+  my_data[[i]] <- annotated.file
+}
+
+# Assign samples/cell lines to their sample identifier using external metadata.
+# Import metadata, including cell line annotations (which were manually annotated from ENCODE/Cellosaurus)
+setwd("path/to/ENCODE_cell_line_metadata") # Edit this with your path
+encode_metadata <- read_xlsx("figure4E_supplementary_figure6C_encode_metadata_final.xlsx")
+
+# Sort ENCODE metadata by ascending file accession, and append to the H3K4me3 peak data sorted above
+encode_metadata <- encode_metadata[order(encode_metadata$`File accession`),] 
+encode_metadata_essential <- encode_metadata[,c(1,11:15)] # Keep important metadata, including accession number to confirm sample order.
+encode_metadata_append <- list() # Make new list for metadata
+encode_metadata_append <- split(encode_metadata_essential, 1:nrow(encode_metadata_essential)) # Split rows of metadata frame into separate list items.
+media_encode_peaks_metadata <- mapply(append, my_data, encode_metadata_append, SIMPLIFY = FALSE) # Append each list item across the parallel lists.
+media_encode_peaks_metadata <- media_encode_peaks_metadata %>%
+  map(as.data.frame) # Convert list items to data frame
+
+# Save media list as data frame, and sort by descending peak intensity from media cf-chromatin profile
+media_peaks_metadata <- as.data.frame(media_encode_peaks_metadata$`SUDHL6_H3K4me3_300ng_Rep1_subsampled_p1e-6.narrowPeak`)
+media_peaks_metadata$V8 <- as.numeric(media_peaks_metadata$V8)
+media_peaks_metadata[is.na(media_peaks_metadata$V8),] <- 0 # Make any NA values 0
+media_peaks_metadata <- media_peaks_metadata %>% 
+  arrange(desc(V8)) # Sort by descending peak intensity
+row_index_new <- data.frame(media_peaks_metadata$row_num) # Take row_num from media_peaks_metadata and save it as a separate data frame, for sorting other files..
+
+# Create data frame to store sorted data frames, and sort all ENCODE H3K4me3 peak sets (and metadata) by the row names of descending media cf-chromatin peaks, by peak intensity
+media_encode_peaks_metadata_final <- data.frame()
+for (i in (media_encode_peaks_metadata)) {
+  temp <- data.frame(i)
+  order <- match(temp$row_num,row_index_new$media_peaks_metadata.row_num)
+  temp <- temp %>% 
+    arrange(order) # order by sorted reference
+  media_encode_peaks_metadata_final <- rbind(media_encode_peaks_metadata_final,temp)
+}
+
+# Perform unsupervised clustering (hierarchical) on the unsorted, unlabeled data as output from each of the databases
+
+# Subset data before pivoting, only keeping H3K4me3 peak intensities, of peaks matched to TSSs.
+media_encode_peaks_metadata_final$V8 <- as.numeric(media_encode_peaks_metadata_final$V8) # convert peak values to numeric
+media_encode_peaks_metadata_final[is.na(media_encode_peaks_metadata_final$V8),4] <- 0 # make any NA values 0
+
+# Subset data to peak signal intensity, ruw number, and cell line name. Pivot from long to wide for clustering.
+media_encode_peaks_metadata_subset <- media_encode_peaks_metadata_final[,c(4,7,9)]
+my_data_clustering <- pivot_wider(media_encode_peaks_metadata_subset, names_from = row_num, values_from = V8)
+my_data_clustering_matrix <- data.matrix(my_data_clustering[,2:19987]) # generate numeric matrix, omitting cell line labels
+
+# log(x+1) transform the matrix before clustering
+my_data_clustering_matrix <- log(my_data_clustering_matrix+1)
+
+# Perform hierarchical clustering
+gc()
+hierarchical <- dist(my_data_clustering_matrix, method = "euclidean") # Calculate euclidean distances
+hierarchical <- replace(hierarchical, is.infinite(hierarchical), 0) # Make Inf = 0.
+clusters_original <- hclust(hierarchical, method = "ward.D2") # Create hclust object from euclidean distance matrix
+cell_line_order <- encode_metadata_essential[clusters_original$order,] # Reorder original data frame by dendrogram order before labeling nodes
+
+# Format dendrogram for dendextend processing
+clusters_original <- as.dendrogram(clusters_original) 
+dendextend::labels(clusters_original) <- cell_line_order$`Biosample term name` # Relabel indices as data labels
+dend_color <- c(GCB_DLBCL = "green", ABC_DLBCL = "red", Blood = "blue", Other = "black") # Set data label colours for dendrogram; for visualization
+dendextend::labels_colors(clusters_original) <- dend_color[cell_line_order$`Biosample Tissue Summary`] # Apply new colours to labels
+par(mar=c(8, 4.1, 4.1, 2.1)) # Increase bottom margain before plotting dendrogram
+
+# Plot dendrogram and rotate clusters so SU-DHL-6 media profile is aligned far left.
+clusters <- click_rotate(clusters_original) # Plot dendrogram, and rotate branches so that SU-DHL-6_Media is positioned at far left.
+
+# Generate data frame with cell line order from dendrogram, to be applied onto heatmap
+clusters_original <- as_hclust_fixed(clusters, clusters_original) # Convert dendrogram object to hclust object.
+cell_line_order <- encode_metadata_essential[clusters_original$order,] # Reorder original data frame by dendrogram order before labeling nodes.
+cell_line_order_subset <- cell_line_order[,2] # Subset to cell line names
+cell_line_order_subset <- cell_line_order_subset[rep(seq_len(nrow(cell_line_order_subset)), each = 19985), ] # Expand frame to same size as original data, with number of rows for the heatmap
+media_encode_peaks_metadata_sorted <- media_encode_peaks_metadata_final # Save to new variable
+
+# Order data by matched reference frame
+media_encode_peaks_metadata_sorted <- media_encode_peaks_metadata_sorted[order(match(media_encode_peaks_metadata_sorted$Biosample.term.name,cell_line_order_subset$`Biosample term name`)),]
+
+# Set factor levels, ensuring the factor levels are unique to avoid duplicate levels
+media_encode_peaks_metadata_sorted$Biosample.term.name <- factor(media_encode_peaks_metadata_sorted$Biosample.term.name, 
+                                                                 levels = unique(media_encode_peaks_metadata_sorted$Biosample.term.name))
+media_encode_peaks_metadata_sorted$row_num <- factor(media_encode_peaks_metadata_sorted$row_num, 
+                                                                 levels = unique(media_encode_peaks_metadata_sorted$row_num))
+
+# log(x+1) transform the peak values before plotting, same as before hierarchical clustering.
+media_encode_peaks_metadata_sorted$V8 <- log(as.numeric(media_encode_peaks_metadata_sorted$V8+1))
+
+# Plot heatmap
+p <- media_encode_peaks_metadata_sorted %>%
+  ggplot(aes(x = Biosample.term.name, y = row_num, fill = as.numeric(V8))) +
+  geom_tile() +
+  labs(x = "Cell Line", 
+       y = element_blank(),
+       fill = "Peak Intensity, Log(x+1)") +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        axis.text.y = element_blank(),
+        legend.position = "left") +
+  scale_fill_gradient()
+
+print(p)
+
+# Colour palatte for cell type summary; colours from met.brewer (Hokusai1)
+colour_k4me3_linear_regression_metadata_tissue_summary <- c("#DF8B58", "#B1BB89", "#C46151", "#224B5E")
+
+# Colour palatte for cancer status; colours from met.brewer (Hokusai1)
+colour_k4me3_linear_regression_metadata_cancer_status <- c("#6D2F20", "#E4A45D")
+
+# Plot tissue type (summary)
+cell_line_metadata_tissue <- media_encode_peaks_metadata_sorted %>% 
+  ggplot(aes(x = Biosample.term.name, y = "Tissue", fill = Biosample.Tissue.Summary)) +
+  geom_tile(colour = "white") +
+  labs(x = element_blank(), 
+       y = element_blank(),
+       fill = "Tissue Type") +
+  theme_cowplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "left") +
+  scale_fill_manual(values = colour_k4me3_linear_regression_metadata_tissue_summary) +
+  coord_equal()
+
+print(cell_line_metadata_tissue)
+
+# Plot cancer status
+cell_line_metadata_cancer_status <- media_encode_peaks_metadata_sorted %>% 
+  ggplot(aes(x = Biosample.term.name, y = "Cancer Status", fill = Cancer.)) +
+  geom_tile(colour = "white") +
+  labs(x = element_blank(), 
+       y = element_blank(),
+       fill = "Cancer Status") +
+  theme_cowplot() +
+  theme(axis.text.x = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.position = "left") +
+  scale_fill_manual(values = colour_k4me3_linear_regression_metadata_cancer_status) +
+  coord_equal()
+
+print(cell_line_metadata_cancer_status)
+
+# After all plots are generated, assemble dendrogram branches, heatmap, and metadata manually into final figure.
+```
+
