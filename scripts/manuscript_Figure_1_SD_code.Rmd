@@ -1,0 +1,241 @@
+---
+title: "Figure 1"
+authors: "Steven D. De Michino"
+date: "`r Sys.Date()`"
+output: html_document
+---
+
+# Simulating cell-free chromatin using preclinical models for cancer-specific biomarker discovery
+
+### Main Figure 1. MNase treatment of media from preclinical models reproducibly generates nucleosomal distributions from cf-chromatin. 
+
+```{r, setup, echo = TRUE, eval = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+
+# Load libraries
+library(tidyverse)
+library(readxl)
+library(cowplot)
+library(reshape2)
+library(ggnewscale)
+
+```
+
+## Figure 1C
+
+C) MNase treatment generates significantly different proportions of mono- di- and tri- cf-nucleosomes compared to no nuclease treatment, reproducible across various 2-D and organoid culture models (CAMA-1 and MCF7=breast adenocarcinoma, HCT116=colorectal carcinoma, A549=lung adenocarcinoma, SU-DHL-6=diffuse large B-cell lymphoma, BPTO.95 and DCBPTO.66=breast cancer patient tumor-derived organoids, BXTO.64=breast cancer patient-derived xenograft derived organoid). Paired t-test for fragments (<200 bp, p=1.53x10-7; 200-400 bp, p=5.05x10-4; 400-600 bp, p=1.44x10-3; >600 bp, p=6.07x10-8. Results from Figure 1C are extracted from the BioAnalyzer traces shown in Supplementary Figure S1B.
+
+```{r, Figure_1C_proportion_of_nucleosomal_fragment_ranges_between_MNase_and_no_MNase_conditions, echo = TRUE, eval = FALSE}
+
+# Data for visualization was output from the Agilent BioAnalyzer 2100 software, from each of the respective conditions
+# Import data
+setwd("path/to/your/dir") # Edit to your file directory
+fragment_frequency_data <- readxl::read_xlsx("figure1C_BioA_quant_mono_di_tri_above600bp_percentage.xlsx")
+
+# Plot fragment ranges
+colour_dotplot <- met.brewer("Hokusai1", 8) # Colour palatte, for reference
+fragment_frequency_data$`Fragment Range` <- forcats::as_factor(fragment_frequency_data$`Fragment Range`) # Set factor level for fragment range
+
+p <- fragment_frequency_data %>% 
+  ggplot(aes(x = `Fragment Range`, y = `Percentage of Fragments`)) +
+  geom_point(aes(shape = `Cell Line`, colour = Condition), size = 4, position = position_dodge(width = 0.3)) +
+  theme_cowplot() +
+  labs(shape = "Model") +
+  scale_shape_manual(values=seq(0,8)) + # Manually scale shape values, as >6 produces an issue for ggplot
+  scale_color_manual(values = c("#AC4D41","#E5A960")) +
+  scale_y_continuous(limits = c(0,100))
+
+print(p)
+
+# Perform paired t-test within each of the fragment ranges
+# Function to perform paired t-test and return p-value
+perform_paired_t_test <- function(df, condition1, condition2) {
+  df_condition1 <- df[df$Condition == condition1,]
+  df_condition2 <- df[df$Condition == condition2,]
+  t.test(df_condition1$`Percentage of Fragments`, df_condition2$`Percentage of Fragments`, paired = TRUE)$p.value
+}
+
+# Perform paired t-test for each fragment range
+fragment_ranges <- c("<200", "200-400", "400-600", ">600")
+p_values <- sapply(fragment_ranges, function(range) {
+  perform_paired_t_test(fragment_frequency_data[fragment_frequency_data$`Fragment Range` == range, ], "MNase", "No MNase")
+})
+
+```
+
+## Figure 1D
+
+D) HCT116 and CAMA-1 media samples were treated with a fixed concentration of MNase over a 0 to 30-minute time course. The proportion of mononucleosome-sized fragments increases with digestion time, with a small fraction of mononucleosomes at earlier time points relative to later.
+
+```{r, Figure_1D_re-plot_BioAnalyzer_traces_for_time_course, echo = TRUE, eval = FALSE}
+
+# Take BioAnalyzer data as input, and plot lines in a cleaner manner
+
+# Colour palatte for both traces 
+trace_colour <- met.brewer("Cross", 7)
+
+# Start with HCT116 traces 
+setwd("path/to/dir/")  # Set your path to the HCT116 trace files location
+
+# Import BioAnalyzer data (stored as individual files). Repeat import was used as sample number was not consistent with time point.
+HCT_ladder <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Ladder.csv", skip = 17, nrows = 2122)
+HCT_mnase_0min <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Sample7.csv", skip = 17, nrows = 2122)
+HCT_mnase_1min <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Sample1.csv", skip = 17, nrows = 2122)
+HCT_mnase_2min <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Sample2.csv", skip = 17, nrows = 2122)
+HCT_mnase_5min <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Sample3.csv", skip = 17, nrows = 2122)
+HCT_mnase_10min <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Sample4.csv", skip = 17, nrows = 2122)
+HCT_mnase_15min <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Sample5.csv", skip = 17, nrows = 2122)
+HCT_mnase_30min <- read.csv("HCT116_timecourse_rawdata_2021-06-22_Sample6.csv", skip = 17, nrows = 2122)
+
+# Add third column to each data frame representing the sample ID.
+HCT_mnase_0min <- mutate(HCT_mnase_0min, Sample = "0")
+HCT_mnase_1min <- mutate(HCT_mnase_1min, Sample = "1")
+HCT_mnase_2min <- mutate(HCT_mnase_2min, Sample = "2")
+HCT_mnase_5min <- mutate(HCT_mnase_5min, Sample = "5")
+HCT_mnase_10min <- mutate(HCT_mnase_10min, Sample = "10")
+HCT_mnase_15min <- mutate(HCT_mnase_15min, Sample = "15")
+HCT_mnase_30min <- mutate(HCT_mnase_30min, Sample = "30")
+
+# Save ladder to new data frame
+combined_intervals <- HCT_ladder
+
+combined_intervals <- combined_intervals %>% 
+  dplyr::filter(Value > 100)
+
+combined_intervals$TimeDiff <- c(NA, diff(combined_intervals$Time))
+
+# Initialize a new data frame to store the filtered results
+filtered_intervals <- data.frame()
+
+# Iterate through the rows of combined_intervals
+for (i in 1:nrow(combined_intervals)) {
+  # Check if TimeDiff is not missing and greater than or equal to 1, or if it's NA
+  if (!is.na(combined_intervals$TimeDiff[i]) && combined_intervals$TimeDiff[i] >= 1) {
+    # Calculate the time range
+    time_range <- combined_intervals$Time[i] + c(-0.5, 0.5)
+    
+    # Subset rows within the time range
+    subset_data <- combined_intervals[combined_intervals$Time >= time_range[1] &
+                                      combined_intervals$Time <= time_range[2], ]
+    
+    # Check if there are rows within the time range
+    if (nrow(subset_data) > 0) {
+      # Find the row with the highest 'Value' within the time range
+      max_row <- subset_data[which.max(subset_data$Value), ]
+      
+      # Append the max_row to the filtered_intervals data frame
+      filtered_intervals <- rbind(filtered_intervals, max_row)
+    }
+  } else if (is.na(combined_intervals$TimeDiff[i])) {
+    # Keep rows where TimeDiff is NA
+    filtered_intervals <- rbind(filtered_intervals, combined_intervals[i, ])
+  }
+}
+
+# Manually set ladder fragment sizes. These will be used for both HCT116 and CAMA-1 time course visualizations.
+ladder_sizes <- c(35, 50, 100, 150, 200, 300, 400, 500, 600, 700, 1000, 2000, 3000, 7000, 10380)
+merge_ladder_migration_time_plus_size <- cbind(filtered_intervals[,1:2], ladder_sizes) # bind ladder_sizes to the data frame of ladder distances
+
+# Merge data frames longitudinally
+HCT_mnase_all <- do.call("rbind", list(HCT_mnase_0min, HCT_mnase_1min, HCT_mnase_2min, HCT_mnase_5min, HCT_mnase_10min, HCT_mnase_15min, HCT_mnase_30min))
+
+# Sort by factor level, based off timepoints
+HCT_mnase_all$Sample <- factor(HCT_mnase_all$Sample, levels = unique(c("0", "1", "2", "5", "10", "15", "30")))
+
+# Line plot of nucleosomal precentages at different MNase digestion timepoints
+HCT_mnase_all %>% 
+  ggplot(aes(x = Time, y = Value, colour = Sample)) +
+  geom_line() +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        text=element_text(size=18)) +
+  labs(title = "HCT116 MNase Time Course",
+       x = "Fragment Length (bp)",
+       y = "Band Intensity",
+       colour = "MNase\nDigestion\nTime\n(Min)") + # so that the legend label is stacked
+  scale_x_continuous(breaks = c(merge_ladder_migration_time_plus_size$Time), labels = c(merge_ladder_migration_time_plus_size$ladder_sizes)) +
+  scale_colour_manual(values = trace_colour)
+
+
+# Next move to CAMA-1 traces, repetition here from previous HCT116 section, showing for clarity
+setwd("path/to/dir/")  # Set your path to the CAMA-1 trace files location
+
+# Import BioAnalyzer data (stored as individual files)
+CAMA_1_ladder <- read.csv("cama1_raw_2021-07-06_10-40-10_Ladder.csv", skip = 17, nrows = 2122)
+CAMA_1_mnase_0min <- read.csv("cama1_raw_2021-07-06_10-40-10_Sample1.csv", skip = 17, nrows = 2122)
+CAMA_1_mnase_1min <- read.csv("cama1_raw_2021-07-06_10-40-10_Sample2.csv", skip = 17, nrows = 2122)
+CAMA_1_mnase_2min <- read.csv("cama1_raw_2021-07-06_10-40-10_Sample3.csv", skip = 17, nrows = 2122)
+CAMA_1_mnase_5min <- read.csv("cama1_raw_2021-07-06_10-40-10_Sample4.csv", skip = 17, nrows = 2122)
+CAMA_1_mnase_10min <- read.csv("cama1_raw_2021-07-06_10-40-10_Sample5.csv", skip = 17, nrows = 2122)
+CAMA_1_mnase_15min <- read.csv("cama1_raw_2021-07-06_10-40-10_Sample6.csv", skip = 17, nrows = 2122)
+CAMA_1_mnase_30min <- read.csv("cama1_raw_2021-07-06_10-40-10_Sample7.csv", skip = 17, nrows = 2122)
+
+# Add third column to each data frame representing the sample ID.
+CAMA_1_mnase_0min <- mutate(CAMA_1_mnase_0min, Sample = "0")
+CAMA_1_mnase_1min <- mutate(CAMA_1_mnase_1min, Sample = "1")
+CAMA_1_mnase_2min <- mutate(CAMA_1_mnase_2min, Sample = "2")
+CAMA_1_mnase_5min <- mutate(CAMA_1_mnase_5min, Sample = "5")
+CAMA_1_mnase_10min <- mutate(CAMA_1_mnase_10min, Sample = "10")
+CAMA_1_mnase_15min <- mutate(CAMA_1_mnase_15min, Sample = "15")
+CAMA_1_mnase_30min <- mutate(CAMA_1_mnase_30min, Sample = "30")
+
+# Save ladder to new data frame
+combined_intervals <- CAMA_1_ladder
+
+combined_intervals <- combined_intervals %>% 
+  dplyr::filter(Value > 100)
+
+combined_intervals$TimeDiff <- c(NA, diff(combined_intervals$Time))
+
+# Initialize a new data frame to store the filtered results
+filtered_intervals <- data.frame()
+
+# Iterate through the rows of combined_intervals
+for (i in 1:nrow(combined_intervals)) {
+  # Check if TimeDiff is not missing and greater than or equal to 1, or if it's NA
+  if (!is.na(combined_intervals$TimeDiff[i]) && combined_intervals$TimeDiff[i] >= 1) {
+    # Calculate the time range
+    time_range <- combined_intervals$Time[i] + c(-0.5, 0.5)
+    
+    # Subset rows within the time range
+    subset_data <- combined_intervals[combined_intervals$Time >= time_range[1] &
+                                      combined_intervals$Time <= time_range[2], ]
+    
+    # Check if there are rows within the time range
+    if (nrow(subset_data) > 0) {
+      # Find the row with the highest 'Value' within the time range
+      max_row <- subset_data[which.max(subset_data$Value), ]
+      
+      # Append the max_row to the filtered_intervals data frame
+      filtered_intervals <- rbind(filtered_intervals, max_row)
+    }
+  } else if (is.na(combined_intervals$TimeDiff[i])) {
+    # Keep rows where TimeDiff is NA
+    filtered_intervals <- rbind(filtered_intervals, combined_intervals[i, ])
+  }
+}
+
+merge_ladder_migration_time_plus_size <- cbind(filtered_intervals[,1:2], ladder_sizes) # Bind ladder_sizes to the data frame of ladder distances
+
+# Merge data frames longitudinally
+CAMA_1_mnase_all <- do.call("rbind", list(CAMA_1_mnase_0min, CAMA_1_mnase_1min, CAMA_1_mnase_2min,
+                                          CAMA_1_mnase_5min, CAMA_1_mnase_10min, CAMA_1_mnase_15min, CAMA_1_mnase_30min))
+
+# Sort by factor level, based off timepoints
+CAMA_1_mnase_all$Sample <- factor(CAMA_1_mnase_all$Sample, levels = unique(c("0", "1", "2", "5", "10", "15", "30")))
+
+# Line plot of nucleosomal precentages at different MNase digestion timepoints
+CAMA_1_mnase_all %>% 
+  ggplot(aes(x = Time, y = Value, colour = Sample)) +
+  geom_line() +
+  theme_cowplot() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1),
+        text=element_text(size=18)) +
+  labs(title = "CAMA-1 MNase Time Course",
+       x = "Fragment Length (bp)",
+       y = "Band Intensity",
+       colour = "MNase\nDigestion\nTime\n(Min)") + # So that the legend label is stacked
+  scale_x_continuous(breaks = c(merge_ladder_migration_time_plus_size$Time), labels = c(merge_ladder_migration_time_plus_size$ladder_sizes)) +
+  scale_colour_manual(values = trace_colour)
+
+```
